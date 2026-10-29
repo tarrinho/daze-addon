@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import html.parser
 import importlib.util
 import io
 import json
@@ -921,6 +922,71 @@ def test_the_page_never_builds_markup_from_a_server_reply() -> None:
     assert "textContent" in source, (
         "the page no longer uses textContent at all, which means the "
         "check above is passing because nothing renders anything"
+    )
+
+
+def test_the_page_is_well_formed_and_has_its_parts() -> None:
+    """Catch a page broken badly enough not to work at all.
+
+    There is no browser in this environment, so nothing here can prove
+    the page behaves correctly -- only that it is not obviously broken.
+    That is a real gap and worth naming rather than papering over: the
+    behaviour was confirmed by hand, and these assertions are what
+    travels.
+
+    The inline JavaScript is deliberately not syntax-checked here. Doing
+    it needs node, and requiring a JavaScript runtime in a Python
+    project's CI to lint one file would cost more than it returns.
+    ``node -e "new Function(...)"`` over the extracted block does the
+    job when the file is edited.
+
+    Asserted against the ids the script actually reaches for, rather
+    than against a list of element types. The first version checked
+    that a <textarea> existed somewhere, and deleting the access-token
+    textarea outright did not fail it -- the refresh one still
+    satisfied the check. That is rules.md section 3's defect exactly,
+    so the contract being checked is now the real one: every
+    getElementById in the script must find something, or the page
+    throws on a null reference the moment it runs.
+    """
+    source = _html()
+
+    ids: set[str] = set()
+
+    class _Parser(html.parser.HTMLParser):
+        def handle_starttag(
+            self, tag: str, attrs: list[tuple[str, str | None]]
+        ) -> None:
+            for key, value in attrs:
+                if key == "id" and value:
+                    ids.add(value)
+
+    parser = _Parser()
+    parser.feed(source)
+    parser.close()
+
+    wanted = set(re.findall(r'getElementById\("([^"]+)"\)', source))
+    assert wanted, (
+        "no getElementById calls found, so this test is checking nothing"
+    )
+
+    missing = sorted(wanted - ids)
+    assert not missing, (
+        f"the script looks up {missing}, which the markup does not "
+        "define. The page would throw on a null reference as soon as it "
+        "ran."
+    )
+
+    # data-copy buttons name a field the copy handler then looks up.
+    copies = set(re.findall(r'data-copy="([^"]+)"', source))
+    missing_copies = sorted(copies - ids)
+    assert not missing_copies, (
+        f"a copy button points at {missing_copies}, which does not exist"
+    )
+
+    assert source.count("<script>") == 1, (
+        "the page has more than one inline script block; the tests above "
+        "that read its contents assume a single one"
     )
 
 
