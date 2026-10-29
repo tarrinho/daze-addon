@@ -33,6 +33,18 @@ over-read this suite: the script stays in the repository, stays visible
 on GitHub, and still arrives with a git clone. These checks are about
 the artefact people install, not about concealment.
 
+One property of this suite to know before trusting a green run: the
+archive checks read `git archive HEAD`, so they describe the committed
+tree and not the working tree. A file that is staged or untracked is
+invisible to them, which means **these assertions can only change
+result after a commit** -- running them beforehand says nothing about
+what the new commit will contain. That is not hypothetical: the first
+version of this suite went green before its own sibling
+test_qa_get_tokens.py was committed, then failed immediately after,
+because the exclusion was matched with str.endswith and
+"get_tokens.py" is a suffix of "test_qa_get_tokens.py". Re-run this
+suite after committing, not only before.
+
 Run with pytest, or standalone:
 
     python3 tests/test_release_excludes_tools.py
@@ -45,7 +57,7 @@ import json
 import subprocess
 import sys
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -159,10 +171,20 @@ def test_nothing_under_custom_components_prompts_for_a_password() -> None:
 
 
 def test_release_archive_excludes_the_token_script() -> None:
-    """The check this suite exists for, made against git's real output."""
+    """The check this suite exists for, made against git's real output.
+
+    Matched on the exact basename rather than with str.endswith, which
+    was the first version and was wrong: "get_tokens.py" is a suffix of
+    "test_qa_get_tokens.py", so adding that suite made this assertion
+    fail on a file that is supposed to ship. An over-broad match here
+    is not harmless -- it fires on innocent files, and a gate that
+    cries wolf is one somebody eventually switches off.
+    """
     paths = _archive_paths()
 
-    offenders = [path for path in paths if path.endswith(SCRIPT_NAME)]
+    offenders = [
+        path for path in paths if PurePosixPath(path).name == SCRIPT_NAME
+    ]
 
     assert not offenders, (
         f"{SCRIPT_PATH} is in the release source archive GitHub builds "
