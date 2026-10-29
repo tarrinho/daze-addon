@@ -32,6 +32,11 @@ STANDALONE = (
     # here that cannot be undone by a later commit. See rules.md
     # section 0, and the module's own docstring.
     "test_no_device_identifiers.py",
+    # Second for the same reason as the first: a release that ships the
+    # token-minting script puts a password-handling tool on every
+    # user's Home Assistant host, and a published release asset is not
+    # something a later commit takes back.
+    "test_release_excludes_tools.py",
     "test_translations.py",
     "test_auth_getuser.py",
     "test_payload.py",

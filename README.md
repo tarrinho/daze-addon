@@ -69,6 +69,49 @@ The wallbox should now appear as a single device with all sensors and controls g
 
 If your tokens expire, the integration will automatically prompt you to re-enter them through the HA UI. You'll see a notification and a re-authentication flow.
 
+### Minting tokens with `tools/get_tokens.py`
+
+Copying tokens out of a browser is fiddly, so there is a script that
+exchanges a Daze username and password for them:
+
+```bash
+python3 tools/get_tokens.py
+```
+
+**Run it on your own machine. Never install or run it on the Home
+Assistant host.** This integration is deliberately built to hold tokens
+and nothing else — Home Assistant never receives, and must never be
+given, your Daze username or password. The script exists so that stays
+true; running it on the HA host would defeat the point of it.
+
+It prompts for the username and password on hidden stdin prompts, takes
+no command-line arguments and reads no environment variables (either
+would leave the password in `ps` output or shell history), writes
+nothing to disk and logs nothing. Before printing anything it verifies
+the tokens three ways — against Cognito, against a real Daze API call,
+and against the token endpoint the integration later refreshes with — so
+a token that would fail an hour after setup fails here instead. If any
+check fails it says which and prints no tokens.
+
+Paste the two tokens it prints into **Settings → Devices & services →
+Daze**, through the re-authentication flow above. Clear your terminal
+scrollback afterwards: a refresh token is a credential and outlives the
+access token by a long way.
+
+The script is kept out of what users install, by three separate
+mechanisms, and `tests/test_release_excludes_tools.py` holds all three
+in place. HACS installs `custom_components/daze` only, so nothing under
+`tools/` reaches an HA host through it; `hacs.json` sets no
+`zip_release` that would change this; and `.gitattributes` marks
+`tools/` `export-ignore`, which keeps it out of the source archives
+GitHub attaches to a release.
+
+To be clear about what that last one does and does not buy:
+`export-ignore` affects `git archive` only. The script remains in the
+repository, remains visible on GitHub, and still arrives with a
+`git clone`. It is not hidden and is not meant to be — it is simply
+absent from the artefact people install from.
+
 ---
 
 ## Entities

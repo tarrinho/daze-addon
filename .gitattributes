@@ -1,0 +1,22 @@
+# Keep the diagnostic and credential tools out of release archives.
+#
+# GitHub builds the "Source code (zip)" and "(tar.gz)" assets on a
+# release with git archive, which honours export-ignore. Nothing under
+# tools/ belongs in one: several of these scripts write to a charger,
+# and get_tokens.py handles a Daze username and password, which must
+# never reach a Home Assistant host.
+#
+# What this does not do, so nobody is misled by it: export-ignore only
+# affects archive exports. Every file below stays in the repository,
+# stays visible on GitHub, and still arrives with a git clone. It is not
+# a way to hide anything — it keeps the tools out of the artefact people
+# install from, nothing more.
+#
+# HACS is already covered separately and does not depend on this:
+# hacs.json sets no zip_release, so HACS installs custom_components/daze
+# alone. tests/test_release_excludes_tools.py holds both halves in place.
+tools/ export-ignore
+
+# Named as well as covered by the directory rule above, because this is
+# the one whose presence in a release would matter most.
+tools/get_tokens.py export-ignore
