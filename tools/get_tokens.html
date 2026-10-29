@@ -1,6 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!--
+  Daze Wallbox token helper
+  https://github.com/tarrinho/daze-addon
+
+  Part of the daze-addon Home Assistant integration, a fork of
+  arest/daze-addon by Andrea Restello, maintained by Pedro Tarrinho.
+
+  This file signs in to Daze and hands back an access token and a
+  refresh token, so that Home Assistant only ever receives tokens and
+  never your Daze username or password.
+
+  Read it before you trust it -- that is the point of it being one
+  readable file rather than an app. Everything is inline: there is no
+  script, style or font fetched from anywhere, and the
+  Content-Security-Policy below names the only three hosts it is
+  permitted to contact. Keep your own copy and open it from local
+  storage; whoever serves a page controls the code that sees the
+  password.
+
+  The matching command-line version is tools/get_tokens.py in the same
+  repository, and tests/test_qa_get_tokens.py covers both.
+-->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!--
@@ -121,7 +143,16 @@
     padding: .6rem;
     resize: vertical;
   }
-  footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; }
+  footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .8rem;
+  }
+  footer p { margin: 0 0 .5rem; }
+  footer .repo { font-size: .85rem; color: var(--fg); }
+  footer a { color: var(--accent); }
   code { font-family: ui-monospace, monospace; font-size: .85em; }
   [hidden] { display: none !important; }
 </style>
@@ -183,9 +214,24 @@
 </section>
 
 <footer>
-  Companion to <code>tools/get_tokens.py</code> in the daze-addon
-  repository. Same three checks, same endpoints. Never install this on
-  the Home Assistant host.
+  <p class="repo">
+    <strong>daze-addon</strong> &mdash;
+    <a href="https://github.com/tarrinho/daze-addon"
+       target="_blank" rel="noopener noreferrer"
+       >github.com/tarrinho/daze-addon</a>
+  </p>
+  <p>
+    Home Assistant integration for Daze wallboxes, maintained by Pedro
+    Tarrinho, forked from
+    <a href="https://github.com/arest/daze-addon"
+       target="_blank" rel="noopener noreferrer"
+       >arest/daze-addon</a> by Andrea Restello.
+  </p>
+  <p>
+    Companion to <code>tools/get_tokens.py</code> in that repository.
+    Same three checks, same endpoints. Never install either on the Home
+    Assistant host.
+  </p>
 </footer>
 
 <script>

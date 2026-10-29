@@ -768,23 +768,43 @@ def test_the_page_loads_nothing_from_a_third_party() -> None:
     serves the code sees the password. A single <script src> pointing at
     a CDN reintroduces exactly that party, and would do it quietly: the
     page would keep working.
-    """
-    source = _html()
 
-    offenders = re.findall(
-        r'(?:src|href)\s*=\s*"(?!#)([^"]*)"', source, re.IGNORECASE
-    )
-    remote = [
-        value
-        for value in offenders
-        if value.startswith(("http://", "https://", "//"))
-    ]
+    Distinguishes loading from linking, because the two are not the
+    same risk. A ``src`` anywhere, or an ``href`` on a <link>, fetches
+    a resource into this page and lets whoever serves it supply code or
+    styling. An ``href`` on an <a> is navigation the user chooses: it
+    pulls nothing in, and following it leaves the page. The first
+    version of this test matched every href and so would have failed on
+    the footer's link to the project's own repository -- a true
+    positive for the rule as written, and the wrong rule.
+    """
+    remote: list[str] = []
+
+    class _Parser(html.parser.HTMLParser):
+        def handle_starttag(
+            self, tag: str, attrs: list[tuple[str, str | None]]
+        ) -> None:
+            for key, value in attrs:
+                if not value or not value.startswith(
+                    ("http://", "https://", "//")
+                ):
+                    continue
+                # A link is navigation. Anything else named here is
+                # fetched into the page.
+                if key == "src" or (key == "href" and tag != "a"):
+                    remote.append(f"<{tag} {key}={value}>")
+
+    parser = _Parser()
+    parser.feed(_html())
+    parser.close()
 
     assert not remote, (
         f"tools/get_tokens.html loads something remote: {remote}. Every "
         "asset must be inline so that opening the file locally really "
         "does mean nobody else supplies the code."
     )
+
+    source = _html()
 
     for pattern in ("@import", "url(http"):
         assert pattern not in source, (
@@ -991,8 +1011,15 @@ def test_the_page_is_well_formed_and_has_its_parts() -> None:
 
 
 def test_the_page_tells_the_user_not_to_host_it() -> None:
-    """The one instruction the whole delivery choice rests on."""
-    source = _html().lower()
+    """The one instruction the whole delivery choice rests on.
+
+    Whitespace is collapsed before matching. The first version compared
+    against the raw source and broke when the footer was reflowed and
+    "Home Assistant host" ended up split across two lines -- a test
+    failing on where the line wraps says nothing about whether the
+    warning is present.
+    """
+    source = " ".join(_html().lower().split())
 
     assert "local file" in source or "own storage" in source, (
         "the page does not tell the reader to open it from local storage "
