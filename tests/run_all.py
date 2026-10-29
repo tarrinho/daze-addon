@@ -37,6 +37,11 @@ STANDALONE = (
     # user's Home Assistant host, and a published release asset is not
     # something a later commit takes back.
     "test_release_excludes_tools.py",
+    # Drives the real tools/get_tokens.py against a stubbed Cognito.
+    # Pairs with the suite above: that one keeps the script out of a
+    # release, this one checks the script itself never prints a token
+    # it has not verified and never echoes a credential.
+    "test_qa_get_tokens.py",
     "test_translations.py",
     "test_auth_getuser.py",
     "test_payload.py",
