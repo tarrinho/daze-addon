@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  Content-Security-Policy is the main security control in this file, not
+  decoration. connect-src names the only three hosts this page may talk
+  to, so code added later cannot send your password anywhere else: the
+  browser blocks the request before it leaves. default-src 'none' stops
+  any external script, font, stylesheet or tracking pixel from loading,
+  and form-action 'none' stops the form from being submitted anywhere at
+  all -- everything happens through fetch, under the rules below.
+
+  tests/test_qa_get_tokens.py asserts these directives are still here
+  and still list exactly these hosts.
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  style-src 'unsafe-inline';
+  script-src 'unsafe-inline';
+  connect-src https://cognito-idp.eu-central-1.amazonaws.com https://daze.auth.eu-central-1.amazoncognito.com https://webapi.dazeservice.com;
+  form-action 'none';
+  base-uri 'none';
+">
+<title>Daze tokens</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --line: #d8d8d8;
+    --field: #ffffff;
+    --accent: #1557b0;
+    --ok: #1a7f37;
+    --bad: #b3261e;
+    --warn-bg: #fff8e1;
+    --warn-line: #e0b400;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --line: #333333;
+      --field: #1e1e1e;
+      --accent: #7aa7e8;
+      --ok: #5dd27a;
+      --bad: #f2a8a2;
+      --warn-bg: #2a2410;
+      --warn-line: #7a6300;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1rem 1rem 3rem;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.5 system-ui, -apple-system, sans-serif;
+    max-width: 34rem;
+    margin-inline: auto;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+  p.sub { color: var(--muted); margin: 0 0 1.25rem; font-size: .9rem; }
+  label { display: block; font-weight: 600; margin: 0 0 .3rem; font-size: .9rem; }
+  input {
+    width: 100%;
+    padding: .7rem;
+    font-size: 1rem;
+    background: var(--field);
+    color: var(--fg);
+    border: 1px solid var(--line);
+    border-radius: .4rem;
+  }
+  .field { margin-bottom: 1rem; }
+  button {
+    width: 100%;
+    padding: .8rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border: 0;
+    border-radius: .4rem;
+    background: var(--accent);
+    color: #fff;
+  }
+  button:disabled { opacity: .5; }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    margin-top: .5rem;
+  }
+  .note {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--warn-line);
+    padding: .7rem .8rem;
+    border-radius: .3rem;
+    font-size: .85rem;
+    margin: 1.25rem 0;
+  }
+  #log { margin: 1.25rem 0 0; padding: 0; list-style: none; font-size: .9rem; }
+  #log li { padding: .2rem 0; }
+  #log li.ok::before    { content: "\2713\00a0"; color: var(--ok); font-weight: 700; }
+  #log li.bad::before   { content: "\2717\00a0"; color: var(--bad); font-weight: 700; }
+  #log li.run::before   { content: "\2026\00a0"; color: var(--muted); }
+  #log li.bad { color: var(--bad); }
+  .token {
+    margin: 1rem 0 0;
+  }
+  .token textarea {
+    width: 100%;
+    min-height: 5.5rem;
+    font: .75rem/1.35 ui-monospace, monospace;
+    word-break: break-all;
+    background: var(--field);
+    color: var(--fg);
+    border: 1px solid var(--line);
+    border-radius: .4rem;
+    padding: .6rem;
+    resize: vertical;
+  }
+  footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; }
+  code { font-family: ui-monospace, monospace; font-size: .85em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<h1>Daze tokens</h1>
+<p class="sub">
+  Signs in to Daze and hands back an access token and a refresh token for
+  Home Assistant. Your password is used for the one sign-in request and
+  nothing else.
+</p>
+
+<div class="note">
+  <strong>Open this from your own storage, not from a website.</strong>
+  Whoever serves this page controls the code that sees your password, so
+  keep it as a local file. Nothing here is saved: the password is never
+  written to storage, and closing the tab discards everything.
+</div>
+
+<!-- No action and no method. The CSP above also forbids form submission
+     outright, so a stray Enter key cannot post these values anywhere. -->
+<form id="form" autocomplete="on">
+  <div class="field">
+    <label for="username">Daze email</label>
+    <input id="username" name="username" type="email" inputmode="email"
+           autocomplete="username" autocapitalize="none" spellcheck="false"
+           required>
+  </div>
+  <div class="field">
+    <label for="password">Daze password</label>
+    <input id="password" name="password" type="password"
+           autocomplete="current-password" required>
+  </div>
+  <button id="go" type="submit">Get tokens</button>
+</form>
+
+<ul id="log" aria-live="polite"></ul>
+
+<section id="results" hidden>
+  <div class="note">
+    Paste these into Home Assistant under
+    <strong>Settings &rarr; Devices &amp; services &rarr; Daze</strong>.
+    The refresh token is a credential and lasts far longer than the access
+    token &mdash; clear your clipboard afterwards, and do not send either
+    through a messaging app.
+  </div>
+  <div class="token">
+    <label for="access">Access token</label>
+    <textarea id="access" readonly spellcheck="false"></textarea>
+    <button class="secondary" type="button" data-copy="access">Copy access token</button>
+  </div>
+  <div class="token">
+    <label for="refresh">Refresh token</label>
+    <textarea id="refresh" readonly spellcheck="false"></textarea>
+    <button class="secondary" type="button" data-copy="refresh">Copy refresh token</button>
+  </div>
+  <button class="secondary" id="clear" type="button">Clear and start again</button>
+</section>
+
+<footer>
+  Companion to <code>tools/get_tokens.py</code> in the daze-addon
+  repository. Same three checks, same endpoints. Never install this on
+  the Home Assistant host.
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  // Mirrors custom_components/daze/const.py. tests/test_qa_get_tokens.py
+  // asserts these still match, because a stale client id fails in a way
+  // that reads as a bad password rather than as a stale file.
+  var API_BASE_URL = "https://webapi.dazeservice.com/v3";
+  var COGNITO_BASE_URL = "https://daze.auth.eu-central-1.amazoncognito.com";
+  var COGNITO_IDP_URL = "https://cognito-idp.eu-central-1.amazonaws.com/";
+  var CLIENT_ID = "4m0rp7oqarbrc3hn67ivvonba8";
+  var REDIRECT_URI = "https://webportal.dazeservice.com/authentication/callback";
+
+  var INITIATE_AUTH_TARGET = "AWSCognitoIdentityProviderService.InitiateAuth";
+  var GET_USER_TARGET = "AWSCognitoIdentityProviderService.GetUser";
+  var AMZ_JSON = "application/x-amz-json-1.1";
+
+  var PORTAL = "https://webportal.dazeservice.com";
+
+  // Cognito answers with one of these instead of tokens when the account
+  // needs more than a password. None can be completed here, so each is
+  // explained rather than guessed at.
+  var CHALLENGE_HELP = {
+    SMS_MFA:
+      "The account uses SMS multi-factor authentication, which this page " +
+      "cannot complete. Sign in at the Daze web portal and copy the " +
+      "tokens out of the browser instead.",
+    SOFTWARE_TOKEN_MFA:
+      "The account uses app-based (TOTP) multi-factor authentication, " +
+      "which this page cannot complete. Sign in at the Daze web portal " +
+      "instead.",
+    SELECT_MFA_TYPE:
+      "The account has more than one multi-factor method and Cognito is " +
+      "asking which to use. Sign in at the Daze web portal instead.",
+    MFA_SETUP:
+      "Multi-factor authentication must be set up before sign-in can " +
+      "complete. Do that at the Daze web portal first.",
+    NEW_PASSWORD_REQUIRED:
+      "The account must change its password before it can sign in. Do " +
+      "that at the Daze web portal first, then come back.",
+    DEVICE_SRP_AUTH:
+      "The pool requires device-level SRP authentication, which this " +
+      "page does not implement. Sign in at the Daze web portal instead.",
+    PASSWORD_VERIFIER:
+      "Cognito answered with an SRP challenge, which means plain " +
+      "password sign-in is not usable for this account. Sign in at the " +
+      "Daze web portal instead."
+  };
+
+  var form = document.getElementById("form");
+  var logEl = document.getElementById("log");
+  var results = document.getElementById("results");
+  var goButton = document.getElementById("go");
+
+  function clearLog() {
+    while (logEl.firstChild) { logEl.removeChild(logEl.firstChild); }
+  }
+
+  // textContent throughout, never innerHTML: some of these strings carry
+  // text that came back from a server.
+  function say(message, state) {
+    var item = document.createElement("li");
+    item.className = state || "";
+    item.textContent = message;
+    logEl.appendChild(item);
+    return item;
+  }
+
+  function fail(message) {
+    say(message, "bad");
+    throw new Error("handled");
+  }
+
+  function describeError(body) {
+    var kind = String((body && body.__type) || "").split("#").pop();
+    var message = String((body && body.message) || "").trim();
+    if (!kind) { kind = "unknown error"; }
+    return message ? kind + ": " + message : kind;
+  }
+
+  // Returns {status, body}. A non-2xx reply is a result to read, not an
+  // exception -- both Cognito and the Daze API describe failures in the
+  // body.
+  function send(url, options) {
+    return fetch(url, options).then(function (response) {
+      return response.text().then(function (raw) {
+        var body = {};
+        if (raw) {
+          try { body = JSON.parse(raw); } catch (err) { body = {}; }
+        }
+        if (body === null || typeof body !== "object") { body = {}; }
+        return { status: response.status, body: body };
+      });
+    }, function () {
+      // A network-level failure, or a CORS rejection. Both land here
+      // with no detail, by design in the browser.
+      fail(
+        "Could not reach the server. Check the phone's connection. If " +
+        "the connection is fine, the page may have been opened in a way " +
+        "that blocks cross-origin requests."
+      );
+    });
+  }
+
+  function cognito(target, payload) {
+    return send(COGNITO_IDP_URL, {
+      method: "POST",
+      headers: { "Content-Type": AMZ_JSON, "X-Amz-Target": target },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  function authenticate(username, password) {
+    return cognito(INITIATE_AUTH_TARGET, {
+      AuthFlow: "USER_PASSWORD_AUTH",
+      ClientId: CLIENT_ID,
+      AuthParameters: { USERNAME: username, PASSWORD: password }
+    }).then(function (reply) {
+      var body = reply.body;
+
+      if (reply.status === 200 && body.AuthenticationResult) {
+        return body.AuthenticationResult;
+      }
+
+      if (body.ChallengeName) {
+        say("Cognito asked for a further step: " + body.ChallengeName, "bad");
+        fail(
+          CHALLENGE_HELP[body.ChallengeName] ||
+          "This page cannot complete that step. Sign in at the Daze web " +
+          "portal instead."
+        );
+      }
+
+      var kind = String(body.__type || "");
+      var message = String(body.message || "");
+
+      if (kind.indexOf("NotAuthorizedException") !== -1) {
+        fail(
+          "Sign-in was rejected. Daze returns the same message for a " +
+          "wrong email and a wrong password, so check both."
+        );
+      }
+      if (kind.indexOf("UserNotConfirmedException") !== -1) {
+        fail("The account has never been confirmed. Confirm it at " + PORTAL + " first.");
+      }
+      if (kind.indexOf("PasswordResetRequiredException") !== -1) {
+        fail("The account needs a password reset. Do that at " + PORTAL + " first.");
+      }
+      if (
+        kind.indexOf("InvalidParameterException") !== -1 &&
+        message.indexOf("USER_PASSWORD_AUTH") !== -1
+      ) {
+        fail(
+          "Daze no longer allows plain password sign-in for this app, so " +
+          "this page cannot mint tokens any more. Copy them out of " +
+          PORTAL + " instead."
+        );
+      }
+
+      fail("Sign-in failed (HTTP " + reply.status + "): " + describeError(body));
+    });
+  }
+
+  // Check 1 -- Cognito accepts the new access token. Returns the email,
+  // which check 2 needs.
+  function checkGetUser(accessToken) {
+    var line = say("Check 1: Cognito accepts the access token", "run");
+    return cognito(GET_USER_TARGET, { AccessToken: accessToken })
+      .then(function (reply) {
+        if (reply.status !== 200) {
+          line.className = "bad";
+          fail("Check 1 failed: " + describeError(reply.body));
+        }
+        var email = "";
+        var attributes = reply.body.UserAttributes || [];
+        for (var i = 0; i < attributes.length; i++) {
+          if (attributes[i] && attributes[i].Name === "email") {
+            email = String(attributes[i].Value || "");
+            break;
+          }
+        }
+        if (!email) {
+          line.className = "bad";
+          fail(
+            "Check 1 failed: the token works but Daze reports no email " +
+            "address, which the next check needs."
+          );
+        }
+        line.className = "ok";
+        return email;
+      });
+  }
+
+  // Check 2 -- the Daze API accepts the token. This is the check worth
+  // having: a token minted from a password carries a different scope
+  // from one issued by the web portal's sign-in flow, and this is where
+  // that would show.
+  function checkDazeApi(accessToken, email) {
+    var line = say("Check 2: the Daze API accepts the access token", "run");
+    var url = API_BASE_URL + "/users/" + encodeURIComponent(email) +
+      "/networks?includeStats=true";
+    return send(url, {
+      method: "GET",
+      headers: { "authorization": "Bearer " + accessToken }
+    }).then(function (reply) {
+      if (reply.status !== 200) {
+        line.className = "bad";
+        if (reply.status === 401 || reply.status === 403) {
+          fail(
+            "Check 2 failed (HTTP " + reply.status + "). The token is " +
+            "valid for Daze sign-in but the Daze API will not accept it, " +
+            "which usually means a password sign-in does not carry the " +
+            "scope the web portal's sign-in does. If so, the tokens have " +
+            "to be copied out of " + PORTAL + " instead."
+          );
+        }
+        fail("Check 2 failed (HTTP " + reply.status + ").");
+      }
+      line.className = "ok";
+    });
+  }
+
+  // Check 3 -- the endpoint Home Assistant refreshes against accepts the
+  // refresh token. Without this the integration sets up fine and then
+  // breaks about an hour later, looking unrelated to this page. The
+  // refreshed token is discarded: the pair shown is the one checks 1 and
+  // 2 actually tested.
+  function checkRefresh(refreshToken) {
+    var line = say("Check 3: the refresh token works where it has to", "run");
+    var fields = new URLSearchParams();
+    fields.set("client_id", CLIENT_ID);
+    fields.set("redirect_uri", REDIRECT_URI);
+    fields.set("grant_type", "refresh_token");
+    fields.set("refresh_token", refreshToken);
+
+    return send(COGNITO_BASE_URL + "/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+      },
+      body: fields.toString()
+    }).then(function (reply) {
+      if (reply.status !== 200 || !reply.body.access_token) {
+        line.className = "bad";
+        fail(
+          "Check 3 failed (HTTP " + reply.status + "): " +
+          (reply.body.error || describeError(reply.body)) +
+          ". Home Assistant would accept these tokens and then stop " +
+          "working about an hour later, so they are not shown."
+        );
+      }
+      line.className = "ok";
+    });
+  }
+
+  function show(accessToken, refreshToken) {
+    document.getElementById("access").value = accessToken;
+    document.getElementById("refresh").value = refreshToken;
+    results.hidden = false;
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    var usernameField = document.getElementById("username");
+    var passwordField = document.getElementById("password");
+    var username = usernameField.value.trim();
+    var password = passwordField.value;
+
+    if (!username || !password) {
+      clearLog();
+      say("Enter both an email and a password.", "bad");
+      return;
+    }
+
+    clearLog();
+    results.hidden = true;
+    goButton.disabled = true;
+    say("Signing in", "run").className = "run";
+
+    var accessToken = "";
+    var refreshToken = "";
+
+    authenticate(username, password)
+      .then(function (result) {
+        // The password has no further use. Clearing the field is the
+        // only part of this the page actually controls -- the browser
+        // makes no promise about the string itself.
+        passwordField.value = "";
+        password = "";
+
+        accessToken = String(result.AccessToken || "");
+        refreshToken = String(result.RefreshToken || "");
+        if (!accessToken || !refreshToken) {
+          fail("Daze returned a success without both tokens.");
+        }
+        logEl.firstChild.className = "ok";
+        logEl.firstChild.textContent = "Signed in";
+        return checkGetUser(accessToken);
+      })
+      .then(function (email) { return checkDazeApi(accessToken, email); })
+      .then(function () { return checkRefresh(refreshToken); })
+      .then(function () {
+        say("All three checks passed", "ok");
+        show(accessToken, refreshToken);
+      })
+      .catch(function (err) {
+        if (!err || err.message !== "handled") {
+          say("Unexpected problem: " + (err && err.message), "bad");
+        }
+      })
+      .then(function () { goButton.disabled = false; });
+  });
+
+  // Copy buttons. navigator.clipboard is unavailable in some contexts,
+  // so fall back to selecting the text for a manual copy rather than
+  // failing silently.
+  document.addEventListener("click", function (event) {
+    var which = event.target.getAttribute && event.target.getAttribute("data-copy");
+    if (!which) { return; }
+    var field = document.getElementById(which);
+    var done = function () { event.target.textContent = "Copied"; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(field.value).then(done, function () {
+        field.select();
+      });
+    } else {
+      field.select();
+    }
+  });
+
+  document.getElementById("clear").addEventListener("click", function () {
+    document.getElementById("access").value = "";
+    document.getElementById("refresh").value = "";
+    document.getElementById("password").value = "";
+    results.hidden = true;
+    clearLog();
+  });
+}());
+</script>
+</body>
+</html>

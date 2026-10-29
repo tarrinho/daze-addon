@@ -36,9 +36,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 import sys
 import types
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Self
@@ -672,6 +674,269 @@ def test_a_network_failure_exits_four_rather_than_crashing() -> None:
 
     assert code == 4, f"exited {code} rather than 4"
     assert router.calls == []
+
+
+# ------------------------------------------------------------------
+# The phone version
+#
+# tools/get_tokens.html does the same job from a browser, so it can be
+# copied onto a phone and opened from local storage. It is a second
+# implementation of the same protocol, which makes it a drift risk in
+# exactly the way rules.md section 2 describes -- and unlike the Python
+# script, it cannot be driven here, because there is no browser in this
+# environment to run it in. So these tests check the properties that are
+# true of the file itself: where it may send data, what it may load,
+# what it must not keep, and whether its copy of the constants still
+# matches.
+# ------------------------------------------------------------------
+
+
+HTML = ROOT / "tools" / "get_tokens.html"
+
+
+def _html() -> str:
+    return HTML.read_text(encoding="utf-8")
+
+
+def _csp() -> str:
+    """The Content-Security-Policy from the page's meta tag."""
+    source = _html()
+    match = re.search(
+        r'<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"',
+        source,
+        re.IGNORECASE,
+    )
+    assert match, (
+        "tools/get_tokens.html has no Content-Security-Policy meta tag. "
+        "It is the control that stops code in this page from sending the "
+        "password anywhere other than Daze."
+    )
+    return " ".join(match.group(1).split())
+
+
+def test_the_page_may_only_talk_to_daze_and_cognito() -> None:
+    """connect-src is the security control, not a formality.
+
+    The page handles a password. If anything in it ever tried to send
+    that password to a fourth host -- added deliberately, or pulled in
+    by a careless edit -- this directive is what stops the request
+    leaving the browser. Asserted against the hosts derived from
+    const.py so the two cannot drift apart.
+    """
+    directives = {
+        part.split()[0]: part.split()[1:]
+        for part in _csp().split(";")
+        if part.strip()
+    }
+
+    assert "connect-src" in directives, (
+        "the page's CSP no longer restricts connect-src, so it may send "
+        "the password to any host"
+    )
+
+    expected = {
+        urllib.parse.urlparse(getattr(script, name)).netloc
+        for name in ("API_BASE_URL", "COGNITO_BASE_URL", "COGNITO_IDP_URL")
+    }
+    allowed = {
+        urllib.parse.urlparse(value).netloc
+        for value in directives["connect-src"]
+        if value.startswith("https://")
+    }
+
+    assert allowed == expected, (
+        f"connect-src allows {sorted(allowed)} but the endpoints the page "
+        f"actually needs are {sorted(expected)}. A host listed here and "
+        "not needed is somewhere the password could be sent."
+    )
+
+    assert directives.get("default-src") == ["'none'"], (
+        "default-src is not 'none', so the page may load external "
+        "scripts, styles or images"
+    )
+    assert directives.get("form-action") == ["'none'"], (
+        "form-action is not 'none', so a stray submit could post the "
+        "credentials somewhere"
+    )
+
+
+def test_the_page_loads_nothing_from_a_third_party() -> None:
+    """No CDN, no font, no analytics -- nothing.
+
+    The reason this file is opened from local storage is that whoever
+    serves the code sees the password. A single <script src> pointing at
+    a CDN reintroduces exactly that party, and would do it quietly: the
+    page would keep working.
+    """
+    source = _html()
+
+    offenders = re.findall(
+        r'(?:src|href)\s*=\s*"(?!#)([^"]*)"', source, re.IGNORECASE
+    )
+    remote = [
+        value
+        for value in offenders
+        if value.startswith(("http://", "https://", "//"))
+    ]
+
+    assert not remote, (
+        f"tools/get_tokens.html loads something remote: {remote}. Every "
+        "asset must be inline so that opening the file locally really "
+        "does mean nobody else supplies the code."
+    )
+
+    for pattern in ("@import", "url(http"):
+        assert pattern not in source, (
+            f"the page's CSS pulls in {pattern!r} from elsewhere"
+        )
+
+
+def test_the_page_keeps_nothing() -> None:
+    """A stored password or token outlives the tab, and shouldn't.
+
+    The script's equivalent is the static check on open() and environ.
+    Here the storage surfaces are the browser's.
+    """
+    source = _html()
+    banned = (
+        "localStorage",
+        "sessionStorage",
+        "indexedDB",
+        "document.cookie",
+        "showSaveFilePicker",
+    )
+
+    found = [name for name in banned if name in source]
+
+    assert not found, (
+        f"tools/get_tokens.html writes to browser storage: {found}. "
+        "Nothing it handles may outlive the tab."
+    )
+
+
+def test_the_form_cannot_submit_anywhere() -> None:
+    """Belt and braces with form-action 'none' in the CSP.
+
+    A form with an action attribute would send the password as a
+    request to that URL on a stray Enter press, before any script ran.
+    """
+    source = _html()
+    forms = re.findall(r"<form\b[^>]*>", source, re.IGNORECASE)
+
+    assert forms, "the page has no form, so these tests are checking nothing"
+    for tag in forms:
+        assert "action" not in tag.lower(), (
+            f"a form declares an action, which can post the password: {tag}"
+        )
+
+
+def test_the_page_mirrors_the_integration_constants() -> None:
+    """Same drift risk as the Python script, same check.
+
+    A third copy of these values now exists. If Daze moves its app
+    client, a stale copy here fails in a way that reads to the user as a
+    rejected password.
+    """
+    source = _html()
+
+    for name in (
+        "API_BASE_URL",
+        "COGNITO_BASE_URL",
+        "COGNITO_IDP_URL",
+        "CLIENT_ID",
+        "REDIRECT_URI",
+    ):
+        expected = getattr(script, name)
+        match = re.search(
+            rf'var\s+{name}\s*=\s*"([^"]*)"', source
+        )
+        assert match, f"{name} is no longer defined in get_tokens.html"
+        assert match.group(1) == expected, (
+            f"get_tokens.html has a stale {name}: {match.group(1)!r} "
+            f"against {expected!r} in the integration"
+        )
+
+
+def test_the_page_uses_the_plain_password_flow() -> None:
+    """And sends the password in that one request only."""
+    source = _html()
+
+    assert 'AuthFlow: "USER_PASSWORD_AUTH"' in source, (
+        "the page no longer requests USER_PASSWORD_AUTH, so the password "
+        "would be sent where Cognito cannot use it"
+    )
+    assert source.count("PASSWORD:") == 1, (
+        "the password is referenced in more than one request payload; it "
+        "belongs in the sign-in call and nowhere else"
+    )
+
+
+def test_the_page_explains_the_same_challenges_as_the_script() -> None:
+    """The two must not diverge on what they can and cannot handle.
+
+    A challenge the script explains and the page crashes on would send
+    a user round in circles, and the page is the one they will reach
+    for on a phone.
+    """
+    keys = set(
+        re.findall(r"^\s{4}([A-Z_]+):$", _html(), re.MULTILINE)
+    )
+
+    assert keys == set(script.CHALLENGE_HELP), (
+        "the page and the script disagree about which Cognito challenges "
+        f"they explain. Page: {sorted(keys)}. Script: "
+        f"{sorted(script.CHALLENGE_HELP)}."
+    )
+
+
+def test_the_page_never_builds_markup_from_a_server_reply() -> None:
+    """Error text comes back from Cognito and is rendered to the user.
+
+    textContent is safe with it; the HTML sinks are not, and the CSP
+    allows inline script, so an injection would execute.
+
+    Matched on actual use rather than on the bare word. The first
+    version asserted ``"innerHTML" not in source`` and failed on the
+    comment that says textContent is used *instead of* innerHTML --
+    the same over-broad match that
+    tests/test_release_excludes_tools.py records in its own docstring.
+    Twice now, so it is worth stating as a habit: assert on the
+    construct, not on the string that names it.
+    """
+    source = _html()
+
+    sinks = re.findall(
+        r"\.(innerHTML|outerHTML|insertAdjacentHTML)\b"
+        r"|\b(innerHTML|outerHTML)\s*="
+        r"|\bdocument\.write\b",
+        source,
+    )
+
+    assert not sinks, (
+        "the page writes markup rather than text somewhere. "
+        "Server-supplied error text is rendered to the user here, so it "
+        f"must go through textContent. Found: {sinks}"
+    )
+
+    assert "textContent" in source, (
+        "the page no longer uses textContent at all, which means the "
+        "check above is passing because nothing renders anything"
+    )
+
+
+def test_the_page_tells_the_user_not_to_host_it() -> None:
+    """The one instruction the whole delivery choice rests on."""
+    source = _html().lower()
+
+    assert "local file" in source or "own storage" in source, (
+        "the page does not tell the reader to open it from local storage "
+        "rather than from a website, which is the reason it is a file "
+        "rather than a hosted page"
+    )
+    assert "home assistant host" in source, (
+        "the page does not warn against putting it on the Home Assistant "
+        "host"
+    )
 
 
 def _main() -> int:

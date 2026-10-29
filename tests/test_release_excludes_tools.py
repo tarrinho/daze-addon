@@ -61,11 +61,12 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The script this suite exists for. Named rather than globbed: a glob
-# would quietly start passing if the file were renamed, which is the
-# moment the protection is most likely to have been lost.
-SCRIPT_NAME = "get_tokens.py"
-SCRIPT_PATH = "tools/get_tokens.py"
+# The two files this suite exists for: the script, and the browser
+# version of it that gets copied onto a phone. Named rather than
+# globbed, because a glob would quietly start passing if a file were
+# renamed, which is the moment the protection is most likely to have
+# been lost.
+SCRIPT_NAMES = ("get_tokens.py", "get_tokens.html")
 
 
 def _archive_bytes() -> bytes:
@@ -131,14 +132,15 @@ def test_token_script_is_not_under_custom_components() -> None:
     package = ROOT / "custom_components"
     offenders = [
         str(path.relative_to(ROOT))
-        for path in package.rglob(SCRIPT_NAME)
+        for name in SCRIPT_NAMES
+        for path in package.rglob(name)
     ]
 
     assert not offenders, (
-        f"{SCRIPT_NAME} is under custom_components/, which HACS installs "
-        f"on every user's Home Assistant host: {offenders}. It handles a "
-        "Daze username and password and must only ever run on the "
-        "operator's own machine."
+        f"{offenders} is under custom_components/, which HACS installs "
+        "on every user's Home Assistant host. These files handle a Daze "
+        "username and password and must only ever run on the operator's "
+        "own machine."
     )
 
 
@@ -183,13 +185,15 @@ def test_release_archive_excludes_the_token_script() -> None:
     paths = _archive_paths()
 
     offenders = [
-        path for path in paths if PurePosixPath(path).name == SCRIPT_NAME
+        path
+        for path in paths
+        if PurePosixPath(path).name in SCRIPT_NAMES
     ]
 
     assert not offenders, (
-        f"{SCRIPT_PATH} is in the release source archive GitHub builds "
-        f"for a release: {offenders}. Add an export-ignore rule for it "
-        "in .gitattributes."
+        "a credential-handling tool is in the release source archive "
+        f"GitHub builds for a release: {offenders}. Add an export-ignore "
+        "rule for it in .gitattributes."
     )
 
 

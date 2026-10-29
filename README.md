@@ -98,19 +98,61 @@ Daze**, through the re-authentication flow above. Clear your terminal
 scrollback afterwards: a refresh token is a credential and outlives the
 access token by a long way.
 
-The script is kept out of what users install, by three separate
-mechanisms, and `tests/test_release_excludes_tools.py` holds all three
-in place. HACS installs `custom_components/daze` only, so nothing under
-`tools/` reaches an HA host through it; `hacs.json` sets no
-`zip_release` that would change this; and `.gitattributes` marks
+### The same thing on a phone
+
+`tools/get_tokens.html` does the same job from a browser, so you can
+mint tokens on the phone you are already holding and paste them
+straight into the Home Assistant app. It performs the same three checks
+against the same endpoints, and shows the tokens only if all three
+pass.
+
+**Copy it to the phone and open it from local storage — do not host
+it.** Put it in `Downloads` and open `file:///sdcard/Download/get_tokens.html`,
+or whatever path your file manager reports. Bookmark that for next
+time.
+
+The reason is the one that matters most about this file: whoever serves
+a page controls the code that sees your password. A local copy has no
+such party. Putting it on a web host, or in Home Assistant's `www/`
+folder, hands that position to whatever serves it — and unlike a token,
+a password cannot be revoked without changing it everywhere.
+
+Two properties make the local copy worth auditing rather than trusting:
+
+- It loads **nothing** from anywhere — no CDN, no fonts, no analytics.
+  Everything is inline in the one file, so "opened locally" really does
+  mean nobody else supplied the code.
+- Its `Content-Security-Policy` names the only three hosts it may
+  contact. If code were ever added that tried to send your password to
+  a fourth, the browser would block the request before it left. That is
+  enforcement, not a promise, and the test suite asserts the directive
+  still lists exactly those three.
+
+It stores nothing: no cookie, no `localStorage`, no cached token.
+Closing the tab discards everything. Clear your clipboard after pasting
+— a refresh token is a credential and outlives the access token by a
+long way — and prefer pasting between apps on the device over sending
+either token through a messaging app.
+
+If your account uses multi-factor authentication the page cannot
+complete the sign-in, and says so rather than failing obscurely; copy
+the tokens out of the web portal in that case.
+
+### Keeping both out of what users install
+
+Neither file is installed by HACS or shipped in a release, by three
+separate mechanisms, and `tests/test_release_excludes_tools.py` holds
+all three in place. HACS installs `custom_components/daze` only, so
+nothing under `tools/` reaches an HA host through it; `hacs.json` sets
+no `zip_release` that would change this; and `.gitattributes` marks
 `tools/` `export-ignore`, which keeps it out of the source archives
 GitHub attaches to a release.
 
 To be clear about what that last one does and does not buy:
-`export-ignore` affects `git archive` only. The script remains in the
-repository, remains visible on GitHub, and still arrives with a
-`git clone`. It is not hidden and is not meant to be — it is simply
-absent from the artefact people install from.
+`export-ignore` affects `git archive` only. Both files remain in the
+repository, remain visible on GitHub, and still arrive with a
+`git clone`. They are not hidden and are not meant to be — they are
+simply absent from the artefact people install from.
 
 ---
 
